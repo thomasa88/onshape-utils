@@ -1,0 +1,30 @@
+{
+    "type": "script",
+    "description": "OnKey",
+    "store": {
+        "last_notification": 1588444406.7832632
+    },
+    "modes": [
+        3
+    ],
+    "usageCount": 629,
+    "prompt": false,
+    "omitTrigger": false,
+    "showInTrayMenu": false,
+    "abbreviation": {
+        "abbreviations": [],
+        "backspace": true,
+        "ignoreCase": false,
+        "immediate": false,
+        "triggerInside": false,
+        "wordChars": "[\\w]"
+    },
+    "hotkey": {
+        "modifiers": [],
+        "hotKey": "'"
+    },
+    "filter": {
+        "regex": ".*\\|.* - Mozilla Firefox",
+        "isRecursive": false
+    }
+}
