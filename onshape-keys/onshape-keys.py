@@ -1,3 +1,20 @@
+#
+# Copyright (C) 2020  Thomas Axelsson
+# 
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+
 import Xlib
 import Xlib.display
 from Xlib import X
@@ -7,10 +24,25 @@ import argparse
 from array import array
 
 import config
+import keytypes
 
 # Xlib reference: https://tronche.com/gui/x/xlib/
 # python-xlib: https://github.com/python-xlib
 # http://python-xlib.sourceforge.net/doc/html/python-xlib_toc.html
+
+# Columns in X keyboard mapping (same as displayed by xmodmap -pke)
+XMOD_NOMOD = 0
+XMOD_SHIFT = 1
+XMOD_MODESWITCH = 2
+XMOD_MODESWITCH_AND_SHIFT = 3
+XMOD_ISO_LEVEL3_SHIFT = 4
+XMOD_ISO_LEVEL3_SHIFT_AND_SHIFT = 5
+
+SHORTCUT_TOOLBAR_X_OFFSET = 30
+SHORTCUT_TOOLBAR_Y_OFFSET = 30
+SHORTCUT_TOOLBAR_X_SPACING = 34
+SHORTCUT_TOOLBAR_Y_SPACING = 30
+
 
 display = Xlib.display.Display()
 #window = display.get_input_focus().focus
@@ -65,35 +97,37 @@ def handle_event(event):
     # TODO: Should call display.refresh_keyboard_mapping when we get mapping events
     
     if event.type == X.KeyPress or event.type == X.KeyRelease:
+        new_event = event
         window = event.window
         title = window.get_wm_name()
         if WINDOW_TITLE_FILTER.match(title):
             # TODO: Handle modifier, also when grabbing
             keycode = (event.detail, 0)
-            if keycode not in keycode_map:
-                return
-            detail = keycode_map[keycode][0]
-            #keycode = event.detail
-            shift_mask = 0 #event.state # TODO: Let user record shift state
-            props = {
-                'time': event.time, # X.CurrentTime
-                'root':  event.root,
-                'window': window,
-                'same_screen': event.same_screen,
-                'child': event.child,
-                'root_x': event.root_x,
-                'root_y': event.root_y,
-                'event_x': event.event_x,
-                'event_y': event.event_y,
-                'state': shift_mask,
-                'detail': detail
-                }
-            if event.type == X.KeyPress:
-                new_event = Xlib.protocol.event.KeyPress(**props)
-            else:
-                new_event = Xlib.protocol.event.KeyRelease(**props)
-        else:
-            new_event = event
+            if keycode in keycode_map.keys():
+                new_keycode = keycode_map[keycode]
+                if isinstance(new_keycode, keytypes.Shortcut):
+                    print("shortcut")
+                else:
+                    detail = new_keycode[0]
+                    #keycode = event.detail
+                    shift_mask = 0 #event.state # TODO: Let user record shift state
+                    props = {
+                        'time': event.time, # X.CurrentTime
+                        'root':  event.root,
+                        'window': window,
+                        'same_screen': event.same_screen,
+                        'child': event.child,
+                        'root_x': event.root_x,
+                        'root_y': event.root_y,
+                        'event_x': event.event_x,
+                        'event_y': event.event_y,
+                        'state': shift_mask,
+                        'detail': detail
+                        }
+                    if event.type == X.KeyPress:
+                        new_event = Xlib.protocol.event.KeyPress(**props)
+                    else:
+                        new_event = Xlib.protocol.event.KeyRelease(**props)
         window.send_event(new_event, propagate = True)
 
 def grab_keys(windows):
@@ -132,42 +166,47 @@ def map_keys():
         if not old_keycodes:
             raise Exception("You cannot press this key, as it is not in your keyboard layout: " + old_sym)
         old_keycode = old_keycodes[0]
-        print(old_sym, old_keycode)
 
-        # We need our symbols to be available without shift or altgr modifiers
-        # I _think_ onshape checks shift separately, i.e. it asks Javascript for the
-        # key on the keyboard and shift separately.
-        new_keycodes = [c for c in display.keysym_to_keycodes(ord(new_sym)) if c[1] == 0]
-
-        if new_keycodes:
-            new_keycode = new_keycodes[0]
+        if isinstance(new_sym, keytypes.Shortcut):
+            new_keycode = new_sym
         else:
-            # Find unused keycode
-            free_keycode = None
-            for i in range(next_keycode_candidate, 256):
-                keysyms = keyboard_mapping[i - keyboard_mapping_offset]
-                if keysyms[0] == X.NoSymbol:
-                    free_keycode = i
-                    break
+            new_keycode = map_sym_to_keycode(new_sym)
 
-            if not free_keycode:
-                raise Exception("Found no free keycodes. Could not map key: " + new_sym)
-                # TODO: clean-up existing mappings
-
-            next_keycode_candidate = i + 1
-            print(f'Mapping "{new_sym}" to keycode {free_keycode}')
-            #raise False
-            #new_keysyms = [ array('I', (ord(new_sym),)) ]
-            new_keysyms = [ (ord(new_sym), ) ]
-            display.change_keyboard_mapping(first_keycode=free_keycode,
-                                            keysyms=new_keysyms)
-            new_keycode = (free_keycode, 0) # key + position (modifier)
-
-        print(new_sym, new_keycode)
         keycode_map[old_keycode] = new_keycode
     # Sync to make new keycodes come into effect
     display.sync()
-                
+
+def map_sym_to_keycode(new_sym):
+    # We need our symbols to be available without shift or altgr modifiers
+    # I _think_ onshape checks shift separately, i.e. it asks Javascript for the
+    # key on the keyboard and shift separately.
+    new_keycodes = [c for c in display.keysym_to_keycodes(ord(new_sym)) if c[1] == 0]
+
+    if new_keycodes:
+        new_keycode = new_keycodes[0]
+    else:
+        # Find unused keycode
+        free_keycode = None
+        for i in range(next_keycode_candidate, 256):
+            keysyms = keyboard_mapping[i - keyboard_mapping_offset]
+            if keysyms[0] == X.NoSymbol:
+                free_keycode = i
+                break
+
+        if not free_keycode:
+            raise Exception("Found no free keycodes. Could not map key: " + new_sym)
+            # TODO: clean-up existing mappings
+
+        next_keycode_candidate = i + 1
+        print(f'Mapping "{new_sym}" to keycode {free_keycode}')
+        #raise False
+        #new_keysyms = [ array('I', (ord(new_sym),)) ]
+        new_keysyms = [ (ord(new_sym), ) ]
+        display.change_keyboard_mapping(first_keycode=free_keycode,
+                                        keysyms=new_keysyms)
+        new_keycode = (free_keycode, 0) # key + position (modifier)
+
+    return new_keycode
         
 def main():
 #    argparse = argparse.ArgumentParser()
